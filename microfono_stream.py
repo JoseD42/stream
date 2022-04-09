@@ -1,48 +1,76 @@
-from gc import callbacks
-from unittest.util import _count_diff_hashable
+from random import sample
+import tkinter as tk
 import sounddevice as sd
+from matplotlib.pyplot import text
 import numpy as np
+from threading import Thread, Event
 
-periodo_muestreo = 1.0 / 441000
+class StreamThread(Thread):
+    def _init_(self):
+        super()._init_()
+        self.dispositivo_input= 2
+        self.dispositivo_output=4
+        self.tamano_bloque=5500
+        self.canales=1
+        self.tipo_dato= np.int16
+        self.latencia="high"
+        self.frecuencia_muestreo=44100
 
-#print(sd.query_devices())
-#1 entrada
-#3 salida
+    def callback_stream(self, indata, outdata, frames, time, status):
+        global app
+        app.etiqueta_valor_estado["text"]="Grabando"
+        return
 
-#indata: Arreglo de numpy con la info recopilada por la tarjeta de sonido
-#             a traves del dispositivo de entrada
-#outdata: Arreglo de numpy que se le enviará al dispositivo de salida
-#             por default es un silencio (puro 0's)
-#frames: El numero de muestras que tiene indata
-#time:   El tiempo que se lleva haciendo el Stream
-#status: Si ha habido algun error
-def callback_stream(indata, outdata, frames, time, status):
+    def run (self):
+        try:
+            self.event=Event()
+            with sd.Stream(
+                device=(self.dispositivo_input, self.dispositivo_output),blocksize=self.tamano_bloque, samplerate=self.frecuencia_muestreo, channels=self.canales, dtype=self.tipo_dato, latency=self.latencia, callback=self.callback_stream
+            ) as self.stream:
+                self.event.wait()
+        except Exception as e:
+            print(str(e))
 
-    global periodo_muestreo
+#Heredamos de Tk para hcaer una ventana
+class App(tk.Tk):
+    def _init_(self):
+        super()._init_()
+        #Establecer titulo de la ventana
+        self.title("Aplicacioón de audio")
+        #Establecemos tamaño
+        self.geometry("400x300")
 
-    data = indata[:, 0]
-    transformada = np.fft.rfft(data)
-    frecuencias = np.fft.rfftfreq(len(data), periodo_muestreo)
+        boton_iniciar= tk.Button(self, width=20, text="iniciar grabación", command=lambda: self.click_boton_iniciar())
+        boton_iniciar.grid(column=0, row=0)
 
-    #print(data.shape)
-    print("Frecuencia Fundamental: ", 
-        frecuencias[np.argmax(np.abs(transformada))])
-    #outdata[:] = indata
+        boton_detener= tk.Button(self, width=20, text="Detener grabación", command=lambda: self.click_boton_iniciar())
+        boton_detener.grid(column=1, row=0)
 
-try: #Intenta hacer esto
+        etiqueta_estado= tk.Label(text="Estado: ")
+        etiqueta_estado.grid(column=0, row=1)
 
-    with sd.Stream(
-        device = (1, 3), #Se eligen dispositivos (Entrada, Salida)
-        blocksize = 11025, #0 es que la tarjeta de sonido decide el mejor tamaño
-        samplerate = 44100, #Frecuencia de Muestreo
-        channels = 1, #Canales
-        dtype = np.int16, #Tipo de dato (Profundidad de bits)
-        latency = 'high', #Latencia, que tanto tiempo pasa desde entrada hasta salida
-        callback = callback_stream
-    ):
+        self.etiqueta_valor_estado= tk.Label(text="-")
+        self.etiqueta_valor_estado.grid(column=1, row=1)
 
-        print('Presiona tecla Enter para salir')
-        input()
+        stream_thread= StreamThread()
 
-except Exception as e: #Si fallas has esto
-    print(str(e))
+    def click_boton_detener(self):
+        if self.stream_thread.is_alive():
+            self.etiqueta_valor_estado["text"]="Grabación detenida"
+            self.stream_thread.stream.abort()
+            self.stream_thread.event.set()
+            self.stream_thread.join()
+
+    def click_boton_iniciar(self):
+        if self.stream_thread.is_alive():
+            self.stream_thread.daemon= True 
+            self.stream_thread.start()
+            
+
+app=App()
+def main():
+    global app
+    app.mainloop()
+
+if __name__ == "__main__":
+    main()
